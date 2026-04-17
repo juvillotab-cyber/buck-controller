@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Convertidor DC-DC con Control Digital</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@300;400;500;600;700;800;900&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep:#06040f;--bg-mid:#0d0820;--bg-card:rgba(255,255,255,0.04);
+      --border:rgba(120,80,255,0.25);--border-bright:rgba(120,80,255,0.6);
+      --accent-primary:#7c4dff;--accent-cyan:#00e5ff;--accent-magenta:#e040fb;
+      --accent-green:#00e676;--accent-orange:#ff6d00;
+      --text-primary:#f0ecff;--text-secondary:#9e8ec4;--text-dim:#5a4f7a;
+      --glow-purple:0 0 20px rgba(124,77,255,0.4),0 0 60px rgba(124,77,255,0.15);
+      --glow-cyan:0 0 20px rgba(0,229,255,0.4),0 0 60px rgba(0,229,255,0.15);
+      --glow-green:0 0 20px rgba(0,230,118,0.5),0 0 60px rgba(0,230,118,0.2);
+      --glow-red:0 0 20px rgba(255,82,82,0.5),0 0 60px rgba(255,82,82,0.2);
+      --radius-card:16px;--radius-sm:8px;
+    }
+    /* ── Modo Claro ── */
+    body.light-mode {
+      --bg-deep:#f0eeff;--bg-mid:#e8e3ff;--bg-card:rgba(124,77,255,0.06);
+      --border:rgba(120,80,255,0.2);--border-bright:rgba(120,80,255,0.5);
+      --text-primary:#1a1035;--text-secondary:#3d2d6e;--text-dim:#6b5a9e;
+    }
+    body.light-mode::before{background:radial-gradient(ellipse 80% 50% at 20% 10%,rgba(124,77,255,0.10) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(0,180,220,0.07) 0%,transparent 55%),radial-gradient(ellipse 50% 60% at 50% 50%,rgba(180,50,220,0.05) 0%,transparent 70%)}
+    body.light-mode::after{background-image:linear-gradient(rgba(120,80,255,0.06) 1px,transparent 1px),linear-gradient(90deg,rgba(120,80,255,0.06) 1px,transparent 1px)}
+    body.light-mode .stat-card,body.light-mode .card,body.light-mode .setpoint-card{background:rgba(255,255,255,0.75);box-shadow:0 2px 16px rgba(124,77,255,0.08)}
+    body.light-mode .topic-item,body.light-mode .power-box{background:rgba(124,77,255,0.05);border-color:rgba(120,80,255,0.15)}
+    body.light-mode .conn-badge{background:rgba(255,255,255,0.8)}
+    body.light-mode .ctrl-btn{background:rgba(255,255,255,0.8);color:var(--text-secondary)}
+    body.light-mode .sp-input-wrap input[type=number]{background:rgba(255,255,255,0.9);color:var(--text-primary)}
+    body.light-mode .preset-btn{background:rgba(255,255,255,0.8)}
+    body.light-mode .log-entry{border-bottom-color:rgba(120,80,255,0.08)}
+    body.light-mode .header-title h1{background:linear-gradient(90deg,#5b4c86 0%,#665a8a 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    body.light-mode .current-number{background:linear-gradient(180deg,#3d1080 0%,var(--accent-magenta) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+    /* Botón toggle */
+    .theme-toggle{width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:1rem;transition:all 0.25s ease;backdrop-filter:blur(10px);flex-shrink:0}
+    .theme-toggle:hover{border-color:var(--accent-primary);color:var(--accent-primary);box-shadow:0 0 12px rgba(124,77,255,0.3)}
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Exo 2',sans-serif;background:var(--bg-deep);color:var(--text-primary);min-height:100vh;overflow-x:hidden}
+    body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 50% at 20% 10%,rgba(124,77,255,0.18) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 80%,rgba(0,229,255,0.10) 0%,transparent 55%),radial-gradient(ellipse 50% 60% at 50% 50%,rgba(224,64,251,0.07) 0%,transparent 70%);pointer-events:none;z-index:0}
+    body::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(120,80,255,0.04) 1px,transparent 1px),linear-gradient(90deg,rgba(120,80,255,0.04) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+    .app-wrapper{position:relative;z-index:1;max-width:1400px;margin:0 auto;padding:24px 28px 40px}
+    header{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+    .header-left{display:flex;align-items:center;gap:16px}
+    .logo-icon{width:48px;height:48px;background:linear-gradient(135deg,var(--accent-primary),var(--accent-cyan));border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:var(--glow-purple);flex-shrink:0}
+    .logo-icon svg{width:28px;height:28px}
+    .header-title h1{font-family:'Exo 2',sans-serif;font-size:1.35rem;font-weight:800;letter-spacing:0.05em;background:linear-gradient(90deg,#d7d0df 100%,var(--accent-cyan) 0%,var(--accent-primary) 0%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.2}
+    .header-title p{font-size:0.78rem;color:var(--text-secondary);letter-spacing:0.12em;text-transform:uppercase;margin-top:2px}
+    .header-right{display:flex;align-items:center;gap:16px}
+    .conn-badge{display:flex;align-items:center;gap:8px;padding:7px 16px;border-radius:30px;border:1px solid var(--border);background:var(--bg-card);font-size:0.78rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;transition:all 0.4s ease;backdrop-filter:blur(10px)}
+    .conn-dot{width:8px;height:8px;border-radius:50%;background:var(--text-dim);transition:all 0.4s ease}
+    .conn-badge.connected{border-color:rgba(0,230,118,0.4);color:var(--accent-green);box-shadow:var(--glow-green)}
+    .conn-badge.connected .conn-dot{background:var(--accent-green);box-shadow:0 0 8px var(--accent-green);animation:pulse-dot 1.5s ease infinite}
+    .conn-badge.disconnected{border-color:rgba(255,82,82,0.4);color:#ff5252;box-shadow:var(--glow-red)}
+    .conn-badge.disconnected .conn-dot{background:#ff5252}
+    .conn-badge.connecting{border-color:rgba(255,183,0,0.4);color:#ffb300}
+    .conn-badge.connecting .conn-dot{background:#ffb300;animation:pulse-dot 0.8s ease infinite}
+    @keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.4;transform:scale(0.7)}}
+    .last-update{font-size:0.72rem;color:var(--text-dim);letter-spacing:0.06em;text-align:right}
+    .last-update span{display:block}
+    .last-update .time-val{color:var(--text-secondary);font-size:0.82rem}
+    .stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+    .stat-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);padding:20px 22px;backdrop-filter:blur(16px);position:relative;overflow:hidden;transition:border-color 0.3s,box-shadow 0.3s}
+    .stat-card:hover{border-color:var(--border-bright)}
+    .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px 2px 0 0}
+    .stat-card.cyan::before{background:linear-gradient(90deg,transparent,var(--accent-cyan),transparent)}
+    .stat-card.purple::before{background:linear-gradient(90deg,transparent,var(--accent-primary),transparent)}
+    .stat-card.magenta::before{background:linear-gradient(90deg,transparent,var(--accent-magenta),transparent)}
+    .stat-card.green::before{background:linear-gradient(90deg,transparent,var(--accent-green),transparent)}
+    .stat-label{font-size:0.7rem;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:8px}
+    .stat-value{font-family:'Exo 2',sans-serif;font-size:1.8rem;font-weight:700;line-height:1;margin-bottom:6px}
+    .stat-card.cyan .stat-value{color:var(--accent-cyan);text-shadow:0 0 20px rgba(0,229,255,0.5)}
+    .stat-card.purple .stat-value{color:var(--accent-primary);text-shadow:0 0 20px rgba(124,77,255,0.5)}
+    .stat-card.magenta .stat-value{color:var(--accent-magenta);text-shadow:0 0 20px rgba(224,64,251,0.5)}
+    .stat-card.green .stat-value{color:var(--accent-green);text-shadow:0 0 20px rgba(0,230,118,0.5)}
+    .stat-unit{font-size:0.85rem;font-family:'Exo 2',sans-serif;color:var(--text-secondary);margin-left:4px}
+    .stat-delta{font-size:0.72rem;color:var(--text-dim);letter-spacing:0.06em}
+    .stat-delta.up{color:var(--accent-green)}
+    .stat-delta.down{color:#ff5252}
+    .stat-icon{position:absolute;right:18px;top:18px;opacity:0.12;width:36px;height:36px}
+    .main-grid{display:grid;grid-template-columns:1fr 340px;gap:20px}
+    .main-left{display:flex;flex-direction:column;gap:20px}
+    .card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);backdrop-filter:blur(16px);overflow:hidden;transition:border-color 0.3s}
+    .card:hover{border-color:var(--border-bright)}
+    .card-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px 14px;border-bottom:1px solid var(--border)}
+    .card-title{display:flex;align-items:center;gap:10px}
+    .card-title-dot{width:10px;height:10px;border-radius:50%}
+    .card-title h2{font-family:'Exo 2',sans-serif;font-size:0.82rem;font-weight:600;letter-spacing:0.1em;text-transform:uppercase}
+    .card-badge{padding:3px 10px;border-radius:20px;font-size:0.68rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;border:1px solid}
+    .card-badge.live{border-color:rgba(0,230,118,0.5);color:var(--accent-green);background:rgba(0,230,118,0.08)}
+    .card-badge.rate{border-color:rgba(0,229,255,0.4);color:var(--accent-cyan);background:rgba(0,229,255,0.06)}
+    .card-body{padding:20px 22px}
+    .chart-wrapper{position:relative;height:210px}
+    .chart-controls{display:flex;align-items:center;gap:8px}
+    .ctrl-btn{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);cursor:pointer;font-size:0.7rem;display:flex;align-items:center;justify-content:center;transition:all 0.2s}
+    .ctrl-btn:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+    .ctrl-btn.active{border-color:var(--accent-primary);background:rgba(124,77,255,0.15);color:var(--accent-primary)}
+    .current-big{text-align:center;padding:32px 20px;position:relative}
+    .current-label-top{font-size:0.7rem;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:16px}
+    .current-number{font-family:'Exo 2',sans-serif;font-size:4.5rem;font-weight:900;line-height:1;background:linear-gradient(180deg,#fff 0%,var(--accent-magenta) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;filter:drop-shadow(0 0 30px rgba(224,64,251,0.4));transition:all 0.3s ease}
+    .current-unit-big{font-family:'Exo 2',sans-serif;font-size:1.2rem;color:var(--text-secondary);margin-top:8px;letter-spacing:0.2em}
+    .current-ring{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:200px;height:200px;border-radius:50%;border:1px solid rgba(224,64,251,0.15);pointer-events:none}
+    .current-ring-spin{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:170px;height:170px;border-radius:50%;border:2px solid transparent;border-top-color:rgba(224,64,251,0.4);border-right-color:rgba(224,64,251,0.2);animation:spin-ring 3s linear infinite;pointer-events:none}
+    @keyframes spin-ring{to{transform:translate(-50%,-50%) rotate(360deg)}}
+    .current-bar-track{display:flex;align-items:flex-end;gap:3px;height:60px;padding:0 2px}
+    .c-bar{flex:1;border-radius:3px 3px 0 0;background:linear-gradient(180deg,var(--accent-magenta),rgba(224,64,251,0.3));transition:height 0.22s ease-out,opacity 0.22s ease-out;min-height:3px}
+    .power-row{display:flex;gap:10px}
+    .power-box{flex:1;padding:14px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:var(--radius-sm);text-align:center}
+    .power-box .p-label{font-size:0.6rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px}
+    .power-box .p-val{font-family:'Exo 2',sans-serif;font-size:1.1rem;font-weight:700}
+    .power-box.watt .p-val{color:var(--accent-orange);text-shadow:0 0 15px rgba(255,109,0,0.4)}
+    .power-box.eff  .p-val{color:var(--accent-green);text-shadow:0 0 15px rgba(0,230,118,0.4)}
+    .power-box.freq .p-val{color:var(--accent-primary);text-shadow:0 0 15px rgba(124,77,255,0.4)}
+    .setpoint-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);backdrop-filter:blur(16px);overflow:hidden;display:flex;flex-direction:column}
+    .setpoint-body{padding:22px;display:flex;flex-direction:column;flex:1;justify-content:space-between}
+    .sp-current-val{text-align:center;margin-bottom:24px}
+    .sp-current-val .label{font-size:0.68rem;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px}
+    .sp-current-val .value{font-family:'Exo 2',sans-serif;font-size:2.2rem;font-weight:700;color:var(--accent-cyan);text-shadow:var(--glow-cyan)}
+    .sp-current-val .value span{font-size:1rem;color:var(--text-secondary);margin-left:4px}
+    .sp-slider-wrap{margin-bottom:20px}
+    .sp-slider-labels{display:flex;justify-content:space-between;font-size:0.68rem;color:var(--text-dim);letter-spacing:0.08em;margin-bottom:8px}
+    input[type=range]{appearance:none;-webkit-appearance:none;width:100%;height:6px;background:linear-gradient(90deg,var(--accent-primary) 0%,var(--accent-cyan) 100%);border-radius:10px;outline:none;cursor:pointer}
+    input[type=range]::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px var(--accent-primary),0 0 12px rgba(124,77,255,0.6);cursor:grab;transition:box-shadow 0.2s}
+    input[type=range]::-webkit-slider-thumb:active{cursor:grabbing;box-shadow:0 0 0 4px var(--accent-cyan),0 0 20px rgba(0,229,255,0.7)}
+    .sp-input-row{display:flex;gap:10px;margin-bottom:20px}
+    .sp-input-wrap{flex:1;position:relative}
+    .sp-input-wrap input[type=number]{width:100%;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px 44px 11px 14px;font-family:'Exo 2',sans-serif;font-size:1rem;font-weight:600;color:var(--text-primary);outline:none;transition:border-color 0.2s,box-shadow 0.2s}
+    .sp-input-wrap input[type=number]:focus{border-color:var(--accent-primary);box-shadow:0 0 0 3px rgba(124,77,255,0.15)}
+    .sp-input-wrap input[type=number]::-webkit-inner-spin-button,.sp-input-wrap input[type=number]::-webkit-outer-spin-button{appearance:none;-webkit-appearance:none}
+    .sp-unit-tag{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:0.72rem;font-weight:700;letter-spacing:0.08em;color:var(--accent-cyan);pointer-events:none}
+    .btn-send{display:flex;align-items:center;gap:8px;width:100%;padding:13px 20px;border-radius:var(--radius-sm);border:none;background:linear-gradient(135deg,var(--accent-primary),#5c35cc);color:#fff;font-family:'Exo 2',sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;justify-content:center;transition:all 0.25s ease;box-shadow:0 4px 20px rgba(124,77,255,0.35);position:relative;overflow:hidden}
+    .btn-send::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,var(--accent-cyan),var(--accent-primary));opacity:0;transition:opacity 0.3s}
+    .btn-send:hover{transform:translateY(-1px);box-shadow:0 6px 28px rgba(124,77,255,0.55)}
+    .btn-send:hover::before{opacity:1}
+    .btn-send:active{transform:translateY(0)}
+    .btn-send span,.btn-send svg{position:relative;z-index:1}
+    @keyframes btn-flash{0%,100%{box-shadow:0 4px 20px rgba(124,77,255,0.35)}50%{box-shadow:0 0 40px rgba(0,229,255,0.8)}}
+    .btn-send.sending{animation:btn-flash 0.5s ease}
+    .sp-presets{margin-bottom:20px}
+    .sp-preset-label{font-size:0.68rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-dim);margin-bottom:8px}
+    .sp-preset-btns{display:flex;gap:8px;flex-wrap:wrap}
+    .preset-btn{padding:6px 14px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-family:'Exo 2',sans-serif;font-size:0.7rem;font-weight:600;cursor:pointer;transition:all 0.2s}
+    .preset-btn:hover{border-color:var(--accent-cyan);color:var(--accent-cyan);background:rgba(0,229,255,0.06)}
+    .send-feedback{text-align:center;font-size:0.72rem;letter-spacing:0.08em;color:var(--text-dim);min-height:20px;margin-top:12px;transition:color 0.3s}
+    .send-feedback.ok{color:var(--accent-green)}
+    .send-feedback.err{color:#ff5252}
+    .right-col{display:flex;flex-direction:column;gap:20px}
+    .topic-list{display:flex;flex-direction:column;gap:8px}
+    .topic-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:var(--radius-sm);background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)}
+    .topic-dir{font-size:0.6rem;font-weight:800;letter-spacing:0.1em;padding:2px 7px;border-radius:4px;text-transform:uppercase}
+    .topic-dir.sub{background:rgba(0,229,255,0.12);color:var(--accent-cyan);border:1px solid rgba(0,229,255,0.25)}
+    .topic-dir.pub{background:rgba(124,77,255,0.12);color:var(--accent-primary);border:1px solid rgba(124,77,255,0.25)}
+    .topic-path{font-family:'DM Mono',monospace;font-size:0.78rem;color:var(--text-secondary);flex:1}
+    .topic-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+    .log-wrap{max-height:180px;overflow-y:auto;padding:4px 0;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+    .log-wrap::-webkit-scrollbar{width:4px}
+    .log-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+    .log-entry{display:flex;align-items:baseline;gap:8px;padding:5px 4px;border-bottom:1px solid rgba(255,255,255,0.03);font-size:0.72rem;animation:fadeInLog 0.3s ease}
+    @keyframes fadeInLog{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+    .log-time{color:var(--text-dim);flex-shrink:0;font-family:'Exo 2',sans-serif;font-size:0.62rem}
+    .log-msg{color:var(--text-secondary)}
+    .log-entry.info .log-msg{color:var(--accent-cyan)}
+    .log-entry.success .log-msg{color:var(--accent-green)}
+    .log-entry.error .log-msg{color:#ff5252}
+    .log-entry.warn .log-msg{color:#ffb300}
+    @keyframes val-flash{0%{filter:brightness(1)}50%{filter:brightness(1.6)}100%{filter:brightness(1)}}
+    .flash{animation:val-flash 0.4s ease}
+    @keyframes num-update{0%{transform:translateY(-6px);opacity:0}100%{transform:translateY(0);opacity:1}}
+    .num-update{animation:num-update 0.25s ease}
+    @media(max-width:1100px){.main-grid{grid-template-columns:1fr}.right-col{display:grid;grid-template-columns:1fr 1fr}}
+    @media(max-width:768px){.stats-row{grid-template-columns:repeat(2,1fr)}.header-title h1{font-size:1rem}.right-col{grid-template-columns:1fr}}
+    @media(max-width:480px){.app-wrapper{padding:16px 14px 30px}}
+  </style>
+</head>
+<body>
+<div class="app-wrapper">
+  <header>
+    <div class="header-left">
+      <div class="logo-icon">
+        <svg viewBox="0 0 28 28" fill="none"><path d="M4 14h8l3-8 4 16 3-8h6" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="header-title">
+        <h1>Convertidor DC-DC con Control Digital</h1>
+        <p>HiveMQ Cloud &nbsp;·&nbsp; MQTT over WSS &nbsp;·&nbsp; 500 ms</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="last-update">
+        <span>Última actualización</span>
+        <span class="time-val" id="lastUpdate">—</span>
+      </div>
+      <button class="theme-toggle" id="themeToggle" title="Modo claro/oscuro" onclick="toggleTheme()">☀️</button>
+      <div class="conn-badge disconnected" id="connBadge">
+        <div class="conn-dot"></div>
+        <span id="connText">Desconectado</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="stats-row" style="grid-template-columns:repeat(5,1fr);">
+    <div class="stat-card cyan">
+      <div class="stat-label">Voltaje de Salida</div>
+      <div class="stat-value" id="statVolt">—<span class="stat-unit">V</span></div>
+      <div class="stat-delta" id="statVoltDelta">Esperando datos...</div>
+      <svg class="stat-icon" viewBox="0 0 36 36" fill="none"><path d="M6 18h8l4-12 6 24 4-12h8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="stat-card magenta">
+      <div class="stat-label">Corriente de Salida</div>
+      <div class="stat-value" id="statCurr">—<span class="stat-unit">A</span></div>
+      <div class="stat-delta" id="statCurrDelta">Esperando datos...</div>
+      <svg class="stat-icon" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="10" stroke="currentColor" stroke-width="2.5"/><path d="M18 10v4M18 22v4M10 18h4M22 18h4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">Potencia de Salida</div>
+      <div class="stat-value" id="statPow">—<span class="stat-unit">W</span></div>
+      <div class="stat-delta" id="statPowDelta">V × I</div>
+      <svg class="stat-icon" viewBox="0 0 36 36" fill="none"><path d="M20 6l-6 12h8l-6 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="stat-card purple">
+      <div class="stat-label">Setpoint Activo</div>
+      <div class="stat-value" id="statSP">—<span class="stat-unit">V</span></div>
+      <div class="stat-delta" id="statSPDelta">Sin enviar aún</div>
+      <svg class="stat-icon" viewBox="0 0 36 36" fill="none"><path d="M18 6v4M18 26v4M6 18h4M26 18h4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><circle cx="18" cy="18" r="6" stroke="currentColor" stroke-width="2.5"/></svg>
+    </div>
+    <!-- ── NUEVA CARD: Duty Cycle PWM ── -->
+    <div class="stat-card" style="--accent-card:#ff6d00;">
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;border-radius:2px 2px 0 0;background:linear-gradient(90deg,transparent,var(--accent-orange),transparent)"></div>
+      <div class="stat-label">Duty Cycle PWM</div>
+      <div class="stat-value" id="statDuty" style="color:var(--accent-orange);text-shadow:0 0 20px rgba(255,109,0,0.5);">—<span class="stat-unit">%</span></div>
+      <div class="stat-delta" id="statDutyDelta">Esperando datos...</div>
+      <!-- barra de progreso proporcional al duty -->
+      <div style="margin-top:10px;height:4px;border-radius:4px;background:rgba(255,109,0,0.15);overflow:hidden;">
+        <div id="dutyBar" style="height:100%;width:0%;border-radius:4px;background:linear-gradient(90deg,var(--accent-orange),#ffab40);transition:width 0.4s ease;box-shadow:0 0 8px rgba(255,109,0,0.4);"></div>
+      </div>
+      <svg class="stat-icon" viewBox="0 0 36 36" fill="none"><rect x="6" y="10" width="8" height="16" rx="2" stroke="currentColor" stroke-width="2.2"/><rect x="20" y="16" width="10" height="10" rx="2" stroke="currentColor" stroke-width="2.2"/><path d="M6 26h24" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/></svg>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div class="main-left">
+      <!-- Voltage Chart -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-title-dot" style="background:var(--accent-cyan);box-shadow:0 0 8px var(--accent-cyan)"></div>
+            <h2>Voltaje de Salida — Tiempo Real</h2>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span class="card-badge live">● LIVE</span>
+            <span class="card-badge rate">500 ms</span>
+            <div class="chart-controls">
+              <button class="ctrl-btn active" id="btnPause" title="Pausar" onclick="togglePause()">⏸</button>
+              <button class="ctrl-btn" title="Limpiar" onclick="clearChart()">✕</button>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="chart-wrapper"><canvas id="voltageChart"></canvas></div>
+        </div>
+      </div>
+      <!-- Current -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-title-dot" style="background:var(--accent-magenta);box-shadow:0 0 8px var(--accent-magenta)"></div>
+            <h2>Corriente de Salida</h2>
+          </div>
+          <span class="card-badge live">● LIVE</span>
+        </div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center;">
+            <div class="current-big">
+              <div class="current-ring"></div>
+              <div class="current-ring-spin"></div>
+              <div class="current-label-top">Corriente Instantánea</div>
+              <div class="current-number" id="currentBig">0.000</div>
+              <div class="current-unit-big">Amperios</div>
+            </div>
+            <div>
+              <div style="font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px;">Historial — 20 muestras</div>
+              <div class="current-bar-track" id="currentBars"></div>
+              <div style="display:flex;justify-content:space-between;margin-top:6px;">
+                <span style="font-size:0.65rem;color:var(--text-dim);">← antiguo</span>
+                <span style="font-size:0.65rem;color:var(--text-dim);">reciente →</span>
+              </div>
+              <div class="power-row" style="margin-top:16px;">
+                <div class="power-box watt"><div class="p-label">Potencia</div><div class="p-val" id="pwrWatt">— W</div></div>
+                <div class="power-box eff"><div class="p-label">Efic. est.</div><div class="p-val" id="pwrEff">—</div></div>
+                <div class="power-box freq"><div class="p-label">Rate</div><div class="p-val">2 Hz</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-col">
+      <!-- Setpoint -->
+      <div class="setpoint-card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-title-dot" style="background:var(--accent-primary);box-shadow:0 0 8px var(--accent-primary)"></div>
+            <h2>Control de Setpoint</h2>
+          </div>
+          <span class="card-badge rate">Publish</span>
+        </div>
+        <div class="setpoint-body">
+          <div class="sp-slider-wrap">
+            <div class="sp-slider-labels">
+              <span>0 V</span>
+              <span id="sliderValLabel">12.0 V</span>
+              <span>13 V</span>
+            </div>
+            <input type="range" id="spSlider" min="0" max="13" step="0.1" value="12" oninput="onSliderChange(this.value)">
+          </div>
+          <div class="sp-input-row">
+            <div class="sp-input-wrap">
+              <input type="number" id="spInput" min="0" max="13" step="0.1" value="12.0" placeholder="0.0" oninput="onInputChange(this.value)">
+              <span class="sp-unit-tag">VDC</span>
+            </div>
+          </div>
+          <button class="btn-send" id="btnSend" onclick="sendSetpoint()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Enviar Setpoint</span>
+          </button>
+          <div class="send-feedback" id="sendFeedback"></div>
+        </div>
+      </div>
+
+      <!-- Topics -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-title-dot" style="background:var(--accent-green);box-shadow:0 0 8px var(--accent-green)"></div>
+            <h2>Topics MQTT</h2>
+          </div>
+        </div>
+        <div class="card-body" style="padding-top:14px;">
+          <div class="topic-list">
+            <div class="topic-item">
+              <span class="topic-dir sub">SUB</span>
+              <span class="topic-path" id="topicCurrShow">—</span>
+              <div class="topic-dot" id="dotCurr" style="background:var(--text-dim)"></div>
+            </div>
+            <div class="topic-item">
+              <span class="topic-dir sub">SUB</span>
+              <span class="topic-path" id="topicPwmShow">—</span>
+              <div class="topic-dot" id="dotPwm" style="background:var(--text-dim)"></div>
+            </div>
+            <div class="topic-item">
+              <span class="topic-dir pub">PUB</span>
+              <span class="topic-path" id="topicSetShow">—</span>
+              <div class="topic-dot" id="dotSet" style="background:var(--text-dim)"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="card" style="flex:1;">
+        <div class="card-header">
+          <div class="card-title">
+            <div class="card-title-dot" style="background:var(--accent-orange);box-shadow:0 0 8px var(--accent-orange)"></div>
+            <h2>Log del Sistema</h2>
+          </div>
+          <button class="ctrl-btn" onclick="clearLog()">✕</button>
+        </div>
+        <div class="card-body" style="padding:12px 16px;">
+          <div class="log-wrap" id="logWrap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════
+   CONFIGURACIÓN — Editar antes de subir a GitHub
+════════════════════════════════════════ */
+const CONFIG = {
+  broker_host:   "725e0dc5cdcd455aa54bbfe8f84fe245.s1.eu.hivemq.cloud",  // ← Solo el host, sin wss://
+  broker_port:   8884,                               // Puerto WSS de HiveMQ Cloud
+  username:      "juandavid",
+  password:      "FXHf0612",
+  client_id:     "dcdc_dash_" + Math.random().toString(16).slice(2,8),
+
+  topic_voltage: null,                         // Opcional: null cuando el voltaje viene dentro de topic_pwm
+  topic_current: "dcdc/salida/corriente",  // ESP32 publica aquí → float como string
+  topic_setpoint:"dcdc/control/setpoint",  // Dashboard publica aquí → float como string
+  topic_pwm:     "dcdc/salida/data",      // ESP32 publica aquí → JSON {vout, duty}
+
+  max_points: 40,
+  vin_nominal: 24.0  // Voltaje de entrada para calc. eficiencia estimada
+};
+
+let mqttClient = null, isConnected = false, isPaused = false;
+let voltageData = [], timeLabels = [];
+let currentHistory = Array(20).fill(0);
+let lastVoltage = null, lastCurrent = null, lastDuty = null;
+let currentBarsEls = [];
+let chartUpdatePending = false;
+let lastPwmLogTs = 0;
+let lastBarsPaintTs = 0;
+let lastPowerPaintTs = 0;
+let lastCurrentAnimTs = 0;
+const warnLimiter = new Map();
+
+const PERF = {
+  lightweight_mode: true,
+  pwm_log_interval_ms: 5000,
+  flash_min_interval_ms: 100,
+  bars_min_interval_ms: 140,
+  power_min_interval_ms: 120,
+  current_anim_min_interval_ms: 180,
+  warn_min_interval_ms: 2500
+};
+
+function pad2(n){return String(n).padStart(2,'0');}
+function pad3(n){return String(n).padStart(3,'0');}
+function formatTime(d, withMs=false){
+  const h=pad2(d.getHours()), m=pad2(d.getMinutes()), s=pad2(d.getSeconds());
+  return withMs ? `${h}:${m}:${s}.${pad3(d.getMilliseconds())}` : `${h}:${m}:${s}`;
+}
+function setLastUpdateNow(){document.getElementById('lastUpdate').textContent=formatTime(new Date(),true);}
+function addWarnRateLimited(key,msg){
+  const now=Date.now();
+  const last=warnLimiter.get(key)||0;
+  if((now-last)<PERF.warn_min_interval_ms) return;
+  warnLimiter.set(key,now);
+  addLog('warn',msg);
+}
+
+/* Chart */
+const ctx = document.getElementById('voltageChart').getContext('2d');
+const gLine = ctx.createLinearGradient(0,0,0,240);
+gLine.addColorStop(0,'rgba(0,229,255,0.9)'); gLine.addColorStop(1,'rgba(124,77,255,0.5)');
+const gFill = ctx.createLinearGradient(0,0,0,240);
+gFill.addColorStop(0,'rgba(0,229,255,0.22)'); gFill.addColorStop(0.6,'rgba(124,77,255,0.06)'); gFill.addColorStop(1,'rgba(6,4,15,0)');
+
+const voltageChart = new Chart(ctx,{
+  type:'line',
+  data:{labels:[],datasets:[{label:'Voltaje (V)',data:[],borderColor:gLine,backgroundColor:gFill,borderWidth:2.5,pointRadius:0,pointHoverRadius:5,pointHoverBackgroundColor:'#00e5ff',tension:0.4,fill:true}]},
+  options:{
+    responsive:true,maintainAspectRatio:false,
+    animation:false,
+    interaction:{mode:'index',intersect:false},
+    plugins:{
+      legend:{display:false},
+      tooltip:{backgroundColor:'rgba(13,8,32,0.92)',borderColor:'rgba(0,229,255,0.3)',borderWidth:1,titleColor:'#9e8ec4',bodyColor:'#00e5ff',padding:10,callbacks:{label:c=>'  '+c.parsed.y.toFixed(3)+' V'}}
+    },
+    scales:{
+      x:{grid:{color:'rgba(120,80,255,0.07)',drawTicks:false},ticks:{color:'#5a4f7a',font:{size:9,family:'Exo 2'},maxRotation:0,maxTicksLimit:8},border:{color:'rgba(120,80,255,0.12)'}},
+      y:{grid:{color:'rgba(120,80,255,0.07)',drawTicks:false},ticks:{color:'#9e8ec4',font:{size:10,family:'Exo 2'},callback:v=>v.toFixed(0)+'V '},border:{color:'rgba(120,80,255,0.12)'},min:0,max:14}
+    }
+  }
+});
+voltageChart.data.labels = timeLabels;
+voltageChart.data.datasets[0].data = voltageData;
+
+function scheduleChartRedraw(force=false){
+  if(!force && chartUpdatePending) return;
+  chartUpdatePending=true;
+  requestAnimationFrame(()=>{
+    chartUpdatePending=false;
+    voltageChart.update('none');
+  });
+}
+
+/* Bars */
+function initBars(){
+  const c=document.getElementById('currentBars'); c.innerHTML='';
+  for(let i=0;i<20;i++){const b=document.createElement('div');b.className='c-bar';b.style.height='3px';c.appendChild(b);}
+  currentBarsEls=Array.from(c.children);
+}
+initBars();
+function updateBars(vals){
+  let m=0.001;
+  for(let i=0;i<vals.length;i++){ if(vals[i]>m) m=vals[i]; }
+  currentBarsEls.forEach((b,i)=>{
+    const p=Math.max(0,Math.min(1,vals[i]/(m||1)));
+    b.style.height=(3+p*57)+'px';
+    b.style.opacity=(0.35+p*0.65).toFixed(3);
+  });
+}
+
+/* MQTT */
+function connectMQTT(){
+  addLog('info',`Conectando → ${CONFIG.broker_host}:${CONFIG.broker_port}`);
+  setConnStatus('connecting','Conectando...');
+  mqttClient=mqtt.connect(`wss://${CONFIG.broker_host}:${CONFIG.broker_port}/mqtt`,{
+    clientId:CONFIG.client_id,username:CONFIG.username,password:CONFIG.password,
+    clean:true,reconnectPeriod:4000,connectTimeout:10000
+  });
+  mqttClient.on('connect',()=>{
+    isConnected=true; setConnStatus('connected','Conectado');
+    addLog('success','Conexión establecida con HiveMQ Cloud');
+    const telemetryTopics=[CONFIG.topic_voltage,CONFIG.topic_current,CONFIG.topic_pwm]
+      .filter(topic => typeof topic === 'string' && topic.length > 0);
+    [...new Set(telemetryTopics)].forEach(topic=>{
+      mqttClient.subscribe(topic,{qos:0},e=>{
+        if(e){addLog('error','Error SUB '+topic); return;}
+        addLog('success','SUB '+topic);
+        if(CONFIG.topic_voltage && topic===CONFIG.topic_voltage) activateDot('dotVolt');
+        if(topic===CONFIG.topic_current) activateDot('dotCurr');
+        if(topic===CONFIG.topic_pwm) activateDot('dotPwm');
+      });
+    });
+    //document.getElementById('topicVoltShow').textContent=CONFIG.topic_voltage || 'No usado (vout por topic_pwm)';
+    document.getElementById('topicCurrShow').textContent=CONFIG.topic_current || 'No configurado';
+    document.getElementById('topicSetShow').textContent=CONFIG.topic_setpoint || 'No configurado';
+    document.getElementById('topicPwmShow').textContent=CONFIG.topic_pwm || 'No configurado';
+    activateDot('dotSet');
+  });
+  mqttClient.on('message',(topic,payload)=>{
+    setLastUpdateNow();
+    const payloadText=payload.toString().trim();
+
+    // ── Topic PWM: payload JSON {"vout":3.30,"duty":45} ──────────────
+    if(topic===CONFIG.topic_pwm){
+      try {
+        const obj=JSON.parse(payloadText);
+        if(typeof obj.duty==='number') onPwmReceived(obj.duty);
+        // Si también trae vout, aprovecharlo como voltaje
+        if(typeof obj.vout==='number') onVoltageReceived(obj.vout);
+      } catch(e){
+        const fallbackV=parseFloat(payloadText);
+        if(!isNaN(fallbackV)){onVoltageReceived(fallbackV);}
+        else{addWarnRateLimited('json_'+topic,'JSON inválido en '+topic+': '+payloadText);}
+      }
+      return;
+    }
+
+    const isCurrentTopic = topic===CONFIG.topic_current;
+    const isVoltageTopic = !!CONFIG.topic_voltage && topic===CONFIG.topic_voltage;
+    if(!isCurrentTopic && !isVoltageTopic) return;
+
+    const v=parseFloat(payloadText);
+    if(isNaN(v)){addWarnRateLimited('num_'+topic,'Payload no numérico en '+topic);return;}
+    if(isVoltageTopic) onVoltageReceived(v);
+    else if(isCurrentTopic) onCurrentReceived(v);
+  });
+  mqttClient.on('error',e=>{addLog('error','MQTT error: '+e.message);setConnStatus('disconnected','Error');});
+  mqttClient.on('offline',()=>{isConnected=false;setConnStatus('disconnected','Sin conexión');addLog('warn','Broker offline — reintentando...');['dotVolt','dotCurr','dotPwm','dotSet'].forEach(deactivateDot);});
+  mqttClient.on('reconnect',()=>{setConnStatus('connecting','Reconectando...');addLog('info','Reintentando conexión...');});
+}
+
+function onVoltageReceived(v){
+  const prev=lastVoltage; lastVoltage=v;
+  activateDot('dotVolt');
+  const el=document.getElementById('statVolt');
+  const voltHtml=v.toFixed(3)+'<span class="stat-unit">V</span>';
+  if(el.innerHTML!==voltHtml){el.innerHTML=voltHtml; triggerFlash(el);}
+  if(prev!==null){const d=v-prev;const de=document.getElementById('statVoltDelta');de.textContent=(d>=0?'▲ ':'▼ ')+Math.abs(d).toFixed(3)+' V';de.className='stat-delta '+(d>=0?'up':'down');}
+  if(!isPaused){
+    const t=formatTime(new Date(),true);
+    voltageData.push(v);timeLabels.push(t);
+    if(voltageData.length>CONFIG.max_points){voltageData.shift();timeLabels.shift();}
+    scheduleChartRedraw();
+  }
+  const now=performance.now();
+  if((now-lastPowerPaintTs)>=PERF.power_min_interval_ms){lastPowerPaintTs=now;updatePower();}
+}
+
+function onCurrentReceived(c){
+  const prev=lastCurrent; lastCurrent=c;
+  const el=document.getElementById('currentBig');
+  const now=performance.now();
+  el.textContent=c.toFixed(3);
+  if(!PERF.lightweight_mode && (now-lastCurrentAnimTs)>=PERF.current_anim_min_interval_ms){
+    lastCurrentAnimTs=now;
+    el.classList.remove('num-update');
+    requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('num-update')));
+  }
+  const sc=document.getElementById('statCurr');
+  sc.innerHTML=c.toFixed(3)+'<span class="stat-unit">A</span>'; triggerFlash(sc);
+  if(prev!==null){const d=c-prev;const de=document.getElementById('statCurrDelta');de.textContent=(d>=0?'▲ ':'▼ ')+Math.abs(d).toFixed(3)+' A';de.className='stat-delta '+(d>=0?'up':'down');}
+  currentHistory.push(c); if(currentHistory.length>20)currentHistory.shift();
+  if((now-lastBarsPaintTs)>=PERF.bars_min_interval_ms){lastBarsPaintTs=now;updateBars(currentHistory);}
+  if((now-lastPowerPaintTs)>=PERF.power_min_interval_ms){lastPowerPaintTs=now;updatePower();}
+}
+
+function onPwmReceived(d){
+  const prev=lastDuty; lastDuty=d;
+  const el=document.getElementById('statDuty');
+  el.innerHTML=d.toFixed(1)+'<span class="stat-unit">%</span>'; triggerFlash(el);
+  // Barra de progreso proporcional al duty (0–100%)
+  document.getElementById('dutyBar').style.width=Math.min(100,Math.max(0,d))+'%';
+  if(prev!==null){
+    const diff=d-prev;
+    const de=document.getElementById('statDutyDelta');
+    de.textContent=(diff>=0?'▲ ':'▼ ')+Math.abs(diff).toFixed(1)+'% vs anterior';
+    de.className='stat-delta '+(diff>=0?'up':'down');
+  }
+  activateDot('dotPwm');
+  const now=Date.now();
+  if(now-lastPwmLogTs>=PERF.pwm_log_interval_ms){
+    lastPwmLogTs=now;
+    addLog('info','PWM duty: '+d.toFixed(1)+'%');
+  }
+}
+
+function updatePower(){
+  if(lastVoltage!==null&&lastCurrent!==null){
+    const p=lastVoltage*lastCurrent;
+    const statPow=document.getElementById('statPow');
+    const pHtml=p.toFixed(2)+'<span class="stat-unit">W</span>';
+    if(statPow.innerHTML!==pHtml) statPow.innerHTML=pHtml;
+    const wattTxt=p.toFixed(2)+' W';
+    const pwrWatt=document.getElementById('pwrWatt');
+    if(pwrWatt.textContent!==wattTxt) pwrWatt.textContent=wattTxt;
+    const pin=CONFIG.vin_nominal*lastCurrent;
+    const eff=pin>0.01?Math.min(99.9,(p/pin)*100):0;
+    const effTxt=eff.toFixed(1)+'%';
+    const pwrEff=document.getElementById('pwrEff');
+    if(pwrEff.textContent!==effTxt) pwrEff.textContent=effTxt;
+    document.getElementById('statPowDelta').textContent=lastVoltage.toFixed(2)+'V × '+lastCurrent.toFixed(3)+'A';
+  }
+}
+
+/* Setpoint */
+function onSliderChange(v){document.getElementById('spInput').value=parseFloat(v).toFixed(1);document.getElementById('sliderValLabel').textContent=parseFloat(v).toFixed(1)+' V';}
+function onInputChange(v){const c=Math.max(0,Math.min(13,parseFloat(v)||0));document.getElementById('spSlider').value=c;document.getElementById('sliderValLabel').textContent=c.toFixed(1)+' V';}
+function setPreset(v){document.getElementById('spInput').value=v.toFixed(1);document.getElementById('spSlider').value=v;document.getElementById('sliderValLabel').textContent=v.toFixed(1)+' V';}
+
+function sendSetpoint(){
+  const v=parseFloat(document.getElementById('spInput').value);
+  if(isNaN(v)||v<0||v>13){showFeedback('Valor fuera de rango (0–13 V)','err');return;}
+  if(!isConnected||!mqttClient){showFeedback('Sin conexión MQTT','err');return;}
+  document.getElementById('statSP').innerHTML=v.toFixed(3)+'<span class="stat-unit">V</span>';
+  document.getElementById('statSPDelta').textContent='Enviado '+new Date().toLocaleTimeString('es-CO');
+  mqttClient.publish(CONFIG.topic_setpoint,v.toFixed(3),{qos:1,retain:false},err=>{
+    if(err){addLog('error','Error publish: '+err.message);showFeedback('Error al enviar setpoint','err');}
+    else{addLog('success','Setpoint → '+v.toFixed(3)+' V');showFeedback('✓ Setpoint '+v.toFixed(3)+' V enviado','ok');}
+  });
+  const btn=document.getElementById('btnSend');btn.classList.add('sending');setTimeout(()=>btn.classList.remove('sending'),600);
+}
+
+function showFeedback(msg,type){
+  const el=document.getElementById('sendFeedback');el.textContent=msg;el.className='send-feedback '+type;
+  setTimeout(()=>{el.textContent='Selecciona un voltaje y pulsa enviar';el.className='send-feedback';},3200);
+}
+
+/* Utils */
+function setConnStatus(s,t){document.getElementById('connBadge').className='conn-badge '+s;document.getElementById('connText').textContent=t;}
+function addLog(type,msg){
+  const w=document.getElementById('logWrap'),t=formatTime(new Date(),true);
+  const d=document.createElement('div');d.className='log-entry '+type;
+  const ts=document.createElement('span');ts.className='log-time';ts.textContent=t;
+  const mm=document.createElement('span');mm.className='log-msg';mm.textContent=msg;
+  d.appendChild(ts);d.appendChild(mm);
+  w.insertBefore(d,w.firstChild);if(w.children.length>80)w.removeChild(w.lastChild);
+}
+function clearLog(){document.getElementById('logWrap').innerHTML='';addLog('info','Log limpiado');}
+function togglePause(){isPaused=!isPaused;const b=document.getElementById('btnPause');b.textContent=isPaused?'▶':'⏸';b.className=isPaused?'ctrl-btn':'ctrl-btn active';addLog('info',isPaused?'Gráfico pausado':'Gráfico reanudado');}
+function clearChart(){voltageData.length=0;timeLabels.length=0;scheduleChartRedraw(true);addLog('info','Datos limpiados');}
+function triggerFlash(el){
+  if(PERF.lightweight_mode) return;
+  const now=performance.now();
+  const last=Number(el.dataset.flashTs||0);
+  if((now-last)<PERF.flash_min_interval_ms) return;
+  el.dataset.flashTs=String(now);
+  el.classList.remove('flash');
+  requestAnimationFrame(()=>{ requestAnimationFrame(()=>{ el.classList.add('flash'); }); });
+}
+function activateDot(id){const d=document.getElementById(id);if(d){d.style.background='var(--accent-green)';d.style.boxShadow='0 0 6px var(--accent-green)';}}
+function deactivateDot(id){const d=document.getElementById(id);if(d){d.style.background='var(--text-dim)';d.style.boxShadow='none';}}
+
+/* ── Theme Toggle ── */
+function toggleTheme(){
+  const isLight = document.body.classList.toggle('light-mode');
+
+const svgSol = `<svg width="18" height="18" viewBox="0 0 44 44" fill="none" stroke="white" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5">
+        <circle cx="22" cy="22" r="8"/>
+        <polygon points="22,4 24.5,10 19.5,10" fill="white" stroke="none"/>
+        <polygon points="22,40 24.5,34 19.5,34" fill="white" stroke="none"/>
+        <polygon points="4,22 10,19.5 10,24.5" fill="white" stroke="none"/>
+        <polygon points="40,22 34,19.5 34,24.5" fill="white" stroke="none"/>
+        <polygon points="8.5,8.5 14,12 10,16" fill="white" stroke="none" transform="rotate(0,22,22)"/>
+        <polygon points="35.5,8.5 30,12 34,16" fill="white" stroke="none"/>
+        <polygon points="8.5,35.5 12,30 16,34" fill="white" stroke="none"/>
+        <polygon points="35.5,35.5 30,32 34,28" fill="white" stroke="none"/>
+    </svg>`;
+
+  const svgLuna = `<svg width="18" height="18" viewBox="0 0 44 44" fill="none" stroke="#1a0f3c" stroke-linecap="round" stroke-width="2.5">
+    <path d="M 26,-6 A 18,18 0 1,0 26,16 A 12,12 0 1,1 26,-6 Z" transform="translate(8,18)"/>
+  </svg>`;
+
+  const btn = document.getElementById('themeToggle');
+  btn.innerHTML = isLight ? svgLuna : svgSol;
+  btn.title = isLight ? 'Modo oscuro' : 'Modo claro';
+}
+document.getElementById('themeToggle').innerHTML = `<svg width="18" height="18" viewBox="0 0 44 44" fill="none" stroke="white" stroke-linecap="round" stroke-width="2.5">
+  <circle cx="22" cy="22" r="8"/>
+        <polygon points="22,4 24.5,10 19.5,10" fill="white" stroke="none"/>
+        <polygon points="22,40 24.5,34 19.5,34" fill="white" stroke="none"/>
+        <polygon points="4,22 10,19.5 10,24.5" fill="white" stroke="none"/>
+        <polygon points="40,22 34,19.5 34,24.5" fill="white" stroke="none"/>
+        <polygon points="8.5,8.5 14,12 10,16" fill="white" stroke="none" transform="rotate(0,22,22)"/>
+        <polygon points="35.5,8.5 30,12 34,16" fill="white" stroke="none"/>
+        <polygon points="8.5,35.5 12,30 16,34" fill="white" stroke="none"/>
+        <polygon points="35.5,35.5 30,32 34,28" fill="white" stroke="none"/>
+    </svg>`;
+addLog('info','Dashboard inicializado');
+addLog('info','Broker: '+CONFIG.broker_host+':'+CONFIG.broker_port);
+connectMQTT();
+</script>
+</body>
+</html>
